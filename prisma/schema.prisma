@@ -13,12 +13,40 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum ProjectStatus {
+  pending
+  accepted
+  rejected
+}
+
+// Define a new Enum for user roles
+enum UserRole {
+  STUDENT
+  SUPERVISOR
+  ADMIN
+}
+
 model User {
-  id        Int      @id @default(autoincrement())
-  name      String
-  cardNumber Int    @unique
-  year      Int
-  email     String   @unique
-  password  String
-  createdAt DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  name             String
+  email            String   @unique
+  password         String
+  cardNumber       Int   @unique
+  year             Int
+  role             UserRole @default(STUDENT)
+  projects         Project? // A student has ONE project
+  supervisedProjects Project[] @relation("SupervisedProjects") 
+}
+model Project {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  userId      Int      @unique
+  user        User     @relation(fields: [userId], references: [id])
+  status       ProjectStatus @default(pending)
+  reviewComment   String?
+  createAt DateTime @default(now())
+  supervisorId Int?           // ID of the User (who is a Supervisor) who reviewed it
+  supervisor   User?          @relation("SupervisedProjects", fields: [supervisorId], references: [id])
+  @@index([supervisorId]) // For faster lookup of projects supervised by a user
 }

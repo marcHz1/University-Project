@@ -5,6 +5,8 @@ require('dotenv').config();
 const errorHandling = require('./middleware/errorHandling');
 
 const authRoutes = require('./routes/auth');
+const projectRoutes = require('./routes/project');
+const supervisorRoutes = require('./routes/supervisor');
 
 const app = express();
 app.use(express.json());
@@ -12,6 +14,8 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, './uni-project/frontend-app')));
 
 app.use('/auth', authRoutes);
+app.use('/project', projectRoutes);
+app.use('/supervisor', supervisorRoutes);
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, './uni-project/frontend-app/index.html'));

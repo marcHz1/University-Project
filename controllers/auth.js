@@ -6,11 +6,18 @@ const nodemailer = require('nodemailer');
 const sendgridTransport = require('nodemailer-sendgrid-transport');
 require('dotenv').config();
 
-const transporter = nodemailer.createTransport(sendgridTransport({
+// const transporter = nodemailer.createTransport(sendgridTransport({
+//   auth: {
+//     api_key: process.env.SENDGRID_API_KEY,
+//   },
+// }));
+const transporter = nodemailer.createTransport({
+  service: "gmail",
   auth: {
-    api_key: process.env.SENDGRID_API_KEY,
-  },
-}));
+    user: 'themarcsimon2004@gmail.com',
+    pass: process.env.GMAIL_APP_PASS
+  }
+});
 
 exports.signup = async (req, res, next) => {
   const errors = validationResult(req);
@@ -45,6 +52,7 @@ exports.signup = async (req, res, next) => {
         password: hashedPassword,
         cardNumber,
         year,
+        role: 'STUDENT', // 🔑 FIX 1: Set default role for new signups
       },
     });
 
@@ -118,6 +126,7 @@ exports.login = async (req, res, next) => {
       {
         email: loadedUser.email,
         userId: loadedUser.id,
+        role: loadedUser.role, // 🔑 FIX 2: Add role to the JWT payload
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -129,6 +138,7 @@ exports.login = async (req, res, next) => {
       userId: loadedUser.id,
       name: loadedUser.name,
       email: loadedUser.email,
+      role: loadedUser.role, // 🔑 FIX 3: Add role to the response body for the frontend
     });
   } catch (error) {
     console.error(error);
