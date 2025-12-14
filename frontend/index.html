@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aleppo University Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: "#003366",
+              accent: "#FFD700",
+              "bg-main": "#F4F7F9",
+              "card-bg": "#FFFFFF",
+            },
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body
+    class="bg-bg-main font-sans flex items-center justify-center min-h-screen p-4"
+  >
+    <div
+      id="notification-container"
+      class="fixed top-5 right-5 z-50 space-y-2"
+    ></div>
+
+    <div id="app-container" class="w-full max-w-lg"></div>
+
+    <script>
+      // --- Configuration ---
+      const BASE_URL = "http://localhost:3000"; // Matches your Express server port
+
+      // Global variable to store fetched project data
+      let userProject = null;
+
+      // --- Utility Functions ---
+
+      /**
+       * Shows a temporary notification message.
+       * @param {string} message - The message content.
+       * @param {string} type - 'success', 'error', or 'info'.
+       */
+      const showNotification = (message, type) => {
+        const container = document.getElementById("notification-container");
+        const colorMap = {
+          success: "bg-green-500",
+          error: "bg-red-500",
+          info: "bg-blue-500",
+        };
+
+        const notification = document.createElement("div");
+        notification.className = `p-4 rounded-lg shadow-lg text-white ${
+          colorMap[type] || "bg-gray-700"
+        } max-w-sm transition-all duration-300 transform translate-x-full opacity-0`;
+        notification.textContent = message;
+
+        container.prepend(notification); // Add to the top
+
+        // Animate in
+        setTimeout(() => {
+          notification.classList.remove("translate-x-full", "opacity-0");
+          notification.classList.add("translate-x-0", "opacity-100");
+        }, 10);
+
+        // Animate out and remove
+        setTimeout(() => {
+          notification.classList.remove("translate-x-0", "opacity-100");
+          notification.classList.add("translate-x-full", "opacity-0");
+          setTimeout(() => notification.remove(), 300); // Wait for transition to finish
+        }, 5000);
+      };
+
+      /**
+       * Saves authentication data to Local Storage.
+       */
+      const saveAuthData = (data) => {
+        localStorage.setItem("authToken", data.token);
+        localStorage.setItem("userEmail", data.email);
+        localStorage.setItem("userName", data.name);
+        localStorage.setItem("userId", data.userId);
+        localStorage.setItem("userRole", data.role);
+      };
+
+      /**
+       * Retrieves authentication data from Local Storage.
+       */
+      const getAuthData = () => {
+        return {
+          token: localStorage.getItem("authToken"),
+          email: localStorage.getItem("userEmail"),
+          name: localStorage.getItem("userName"),
+          userId: localStorage.getItem("userId"),
+          role: localStorage.getItem("userRole"),
+        };
+      };
+
+      /**
+       * Removes authentication data from Local Storage.
+       */
+      const removeAuthData = () => {
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("userEmail");
+        localStorage.removeItem("userName");
+        localStorage.removeItem("userId");
+        localStorage.removeItem("userRole");
+      };
+
+      // --- API Calls ---
+
+      /**
+       * Fetches the user's project details.
+       */
+      const fetchMyProject = async (token) => {
+        try {
+          const response = await fetch(`${BASE_URL}/project`, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (response.status === 404) {
+            return null; // Project not found
+          }
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || "Failed to fetch project.");
+          }
+          const result = await response.json();
+          return result.project;
+        } catch (error) {
+          console.error("Fetch project error:", error);
+          if (error.message !== "You have not created a project yet") {
+            showNotification("Could not load project details.", "error");
+          }
+          return null;
+        }
+      };
+
+      /**
+       * Fetches all projects with PENDING status for supervisor review.
+       */
+      const fetchPendingProjects = async (token) => {
+        try {
+          const response = await fetch(
+            `${BASE_URL}/supervisor/projects/pending`,
+            {
+              method: "GET",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(
+              error.message || "Failed to fetch pending projects."
+            );
+          }
+          const result = await response.json();
+          return result.projects;
+        } catch (error) {
+          console.error("Fetch pending projects error:", error);
+          showNotification(
+            "Could not load projects for review. Are you sure you are a Supervisor?",
+            "error"
+          );
+          return [];
+        }
+      };
+
+      /**
+       * Fetches the list of all supervisors. (NEW)
+       */
+      const fetchSupervisors = async (token) => {
+        try {
+          // Assuming your new route is /project/supervisors
+          const response = await fetch(`${BASE_URL}/project/supervisors`, {
+            method: "GET",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || "Failed to fetch supervisors.");
+          }
+          const result = await response.json();
+          return result.supervisors;
+        } catch (error) {
+          console.error("Fetch supervisors error:", error);
+          showNotification(
+            "Could not load supervisor list. Check backend route.",
+            "error"
+          );
+          return [];
+        }
+      };
+
+      // --- Event Handlers ---
+
+      /**
+       * Handles the Login form submission.
+       */
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        const email = e.target.email.value;
+        const password = e.target.password.value;
+
+        try {
+          const response = await fetch(`${BASE_URL}/auth/`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          // Handle non-200 responses safely
+          if (!response.ok) {
+            const errorResult = await response.json();
+            showNotification(
+              errorResult.message || "Login failed. Please check credentials.",
+              "error"
+            );
+            return;
+          }
+
+          const result = await response.json();
+          // NOTE: The role must be included in the login response payload
+          saveAuthData({
+            token: result.token,
+            email: email,
+            name: result.name, // Assuming backend provides name
+            userId: result.userId,
+            role: result.role, // Crucial for dashboard logic
+          });
+          showNotification("Login successful!", "success");
+          renderView("dashboard");
+        } catch (error) {
+          console.error("Login error:", error);
+          showNotification("An unexpected network error occurred.", "error");
+        }
+      };
+
+      /**
+       * Handles the Sign Up form submission.
+       */
+      const handleSignup = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+          name: form.name.value,
+          cardNumber: parseInt(form.cardNumber.value),
+          year: parseInt(form.year.value),
+          email: form.email.value,
+          password: form.password.value,
+        };
+
+        try {
+          const response = await fetch(`${BASE_URL}/auth/`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+
+          // Handle non-200 responses safely
+          if (!response.ok) {
+            const errorResult = await response.json();
+            showNotification(
+              errorResult.message || "Registration failed.",
+              "error"
+            );
+            return;
+          }
+
+          showNotification(
+            "Registration successful! You can now log in.",
+            "success"
+          );
+          renderView("login");
+        } catch (error) {
+          console.error("Signup error:", error);
+          showNotification("An unexpected network error occurred.", "error");
+        }
+      };
+
+      /**
+       * Handles the Sign Out action.
+       */
+      const handleSignout = () => {
+        removeAuthData();
+        showNotification("You have been signed out.", "info");
+        renderView("login");
+      };
+
+      /**
+       * Handles the Create Project form submission.
+       */
+      const handleCreateProject = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+          title: form["project-title"].value,
+          description: form["project-description"].value,
+          supervisorId: parseInt(form["supervisor-select"].value), // Ensure ID is an integer
+        };
+        const { token } = getAuthData();
+
+        try {
+          const response = await fetch(`${BASE_URL}/project`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(data),
+          });
+
+          if (!response.ok) {
+            let errorResult;
+            try {
+              errorResult = await response.json();
+            } catch {
+              showNotification(
+                `Server Error (${response.status}) during creation.`,
+                "error"
+              );
+              return;
+            }
+            showNotification(
+              errorResult.message || "Failed to create project.",
+              "error"
+            );
+            return;
+          }
+
+          const result = await response.json();
+          userProject = result.project; // Update global state
+          showNotification("Project created successfully!", "success");
+          renderView("dashboard");
+        } catch (error) {
+          console.error("Create Project error:", error);
+          showNotification("An unexpected network error occurred.", "error");
+        }
+      };
+
+      /**
+       * Handles the Update Project form submission.
+       */
+      const handleUpdateProject = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const data = {
+          // Only send non-empty values
+          title: form["update-title"].value.trim() || undefined,
+          description: form["update-description"].value.trim() || undefined,
+        };
+        const { token } = getAuthData();
+
+        // Filter out undefined/null properties to only send updated fields
+        const updateBody = Object.fromEntries(
+          Object.entries(data).filter(([_, v]) => v !== undefined)
+        );
+
+        if (Object.keys(updateBody).length === 0) {
+          showNotification("Nothing to update.", "info");
+          return;
+        }
+
+        try {
+          const response = await fetch(`${BASE_URL}/project/`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify(updateBody),
+          });
+
+          // Check for success first.
+          if (response.ok) {
+            const result = await response.json();
+            userProject = result.project; // Update global state
+            showNotification("Project updated successfully!", "success");
+            renderView("dashboard"); // Re-render the entire dashboard/menu
+            return;
+          }
+
+          // Handle failure: Safely attempt to read the error body as JSON.
+          let result;
+          try {
+            result = await response.json();
+          } catch (e) {
+            // If JSON parsing fails (e.g., empty or text body), show generic server error
+            showNotification(
+              `Server Error (${response.status}). The server returned an unreadable response.`,
+              "error"
+            );
+            return;
+          }
+
+          // Show the specific error message from the backend JSON
+          showNotification(
+            result.message || "Failed to update project.",
+            "error"
+          );
+        } catch (error) {
+          console.error("Update Project network error:", error);
+          showNotification("An unexpected network error occurred.", "error");
+        }
+      };
+
+      /**
+       * Handles the Delete Project action.
+       */
+      const handleDeleteProject = async () => {
+        if (
+          !confirm("Are you sure you want to delete your project? This is permanent.")
+        ) {
+          return;
+        }
+
+        const { token } = getAuthData();
+        try {
+          const response = await fetch(`${BASE_URL}/project`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || "Failed to delete project.");
+          }
+
+          userProject = null; // Clear global state
+          showNotification("Project deleted successfully!", "success");
+          renderView("dashboard");
+        } catch (error) {
+          console.error("Delete Project error:", error);
+          showNotification(
+            error.message || "An unexpected error occurred during deletion.",
+            "error"
+          );
+        }
+      };
+
+      /**
+       * Handles the Accept/Decline button click for supervisors.
+       */
+      const handleProjectReview = async (e) => {
+        const button = e.target;
+        const projectId = parseInt(button.dataset.id);
+        const action = button.dataset.action; // 'ACCEPT' or 'DECLINE'
+
+        // 🔑 NEW: Get the comment from the associated textarea using the project ID
+        const commentElement = document.getElementById(
+          `review-comment-${projectId}`
+        );
+        const comment = commentElement ? commentElement.value.trim() : '';
+
+        if (!confirm(`Are you sure you want to ${action} project ID ${projectId}? This action will trigger an email notification to the student.`)) {
+            return;
+        }
+
+        const { token } = getAuthData();
+
+        // Disable all buttons for this project while processing
+        const projectDiv = button.closest('.p-5');
+        projectDiv.querySelectorAll('.review-button').forEach(btn => btn.disabled = true);
+        
+        try {
+            // Note: Assuming your backend route for review is POST /supervisor/review
+            const response = await fetch(`${BASE_URL}/supervisor/projects/${projectId}/review`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                // 🔑 NEW: Include the comment in the request body
+                body: JSON.stringify({ projectId, action, comment }), 
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                showNotification(result.message || `Failed to ${action} project.`, 'error');
+                // Re-enable buttons on failure
+                projectDiv.querySelectorAll('.review-button').forEach(btn => btn.disabled = false);
+                return;
+            }
+
+            showNotification(`Project ${projectId} reviewed successfully: ${result.project.status.toUpperCase()}!`, 'success');
+            
+            // Refresh the list of pending projects immediately
+            handleMenuAction('menu-review-projects'); 
+
+        } catch (error) {
+            console.error('Project Review error:', error);
+            showNotification('An unexpected error occurred during project review.', 'error');
+            // Re-enable buttons on failure
+            projectDiv.querySelectorAll('.review-button').forEach(btn => btn.disabled = false);
+        }
+      };
+
+
+      // --- View Rendering ---
+
+      /**
+       * Renders the current view based on the state ('login', 'signup', 'dashboard').
+       */
+      const renderView = async (viewName) => {
+        const container = document.getElementById("app-container");
+        container.innerHTML = ""; // Clear previous content
+
+        let content;
+        if (viewName === "login") {
+          content = createLoginForm();
+        } else if (viewName === "signup") {
+          content = createSignupForm();
+        } else if (viewName === "dashboard") {
+          const authData = getAuthData();
+          if (!authData.token) {
+            return renderView("login");
+          }
+          // Fetch project only if the user is a student, no need for supervisors
+          if (authData.role === "STUDENT") {
+            userProject = await fetchMyProject(authData.token);
+          } else {
+            userProject = null;
+          }
+          content = createDashboardView(authData);
+        } else {
+          content = '<h2 class="text-xl text-red-600">View Not Found</h2>';
+        }
+
+        container.appendChild(content);
+
+        // Attach listeners after content is added to the DOM
+        if (viewName === "login") {
+          document
+            .getElementById("login-form")
+            .addEventListener("submit", handleLogin);
+          document
+            .getElementById("switch-to-signup")
+            .addEventListener("click", () => renderView("signup"));
+        } else if (viewName === "signup") {
+          document
+            .getElementById("signup-form")
+            .addEventListener("submit", handleSignup);
+          document
+            .getElementById("switch-to-login")
+            .addEventListener("click", () => renderView("login"));
+        } else if (viewName === "dashboard") {
+          document
+            .getElementById("signout-button")
+            .addEventListener("click", handleSignout);
+
+          // Attach Menu Listeners
+          document
+            .getElementById("project-menu")
+            .addEventListener("click", (e) => {
+              if (e.target.tagName === "BUTTON" && e.target.id) {
+                handleMenuAction(e.target.id);
+              }
+            });
+        }
+      };
+
+      /**
+       * Helper function to handle menu clicks and render the correct sub-view.
+       */
+      const handleMenuAction = async (actionId) => {
+        const contentArea = document.getElementById("project-content-area");
+        contentArea.innerHTML = ""; // Clear sub-view
+        const authData = getAuthData();
+
+        if (actionId === "menu-view-project") {
+          if (userProject) {
+            contentArea.appendChild(createProjectDetailsView(userProject));
+            document
+              .getElementById("delete-project-button-view")
+              .addEventListener("click", handleDeleteProject);
+          } else {
+            contentArea.innerHTML =
+              '<p class="text-center text-gray-600">You have not created a project yet. Please use the "Create Project" option.</p>';
+          }
+        } else if (actionId === "menu-create-project") {
+          if (!userProject) {
+            // 🔑 START NEW LOGIC: Fetch supervisors
+            const supervisors = await fetchSupervisors(authData.token);
+            if (supervisors.length === 0) {
+              contentArea.innerHTML =
+                '<p class="text-center text-red-600 font-semibold">Cannot create project: No supervisors are currently registered.</p>';
+              return;
+            }
+            contentArea.appendChild(createProjectCreateForm(supervisors)); // 🔑 PASS SUPERVISORS TO FORM
+            document
+              .getElementById("create-project-form")
+              .addEventListener("submit", handleCreateProject);
+            // 🔑 END NEW LOGIC
+          } else {
+            contentArea.innerHTML =
+              '<p class="text-center text-red-600 font-semibold">You already have a project! Use the Update/View options.</p>';
+          }
+        } else if (actionId === "menu-update-project") {
+          if (userProject) {
+            contentArea.appendChild(createProjectUpdateForm(userProject));
+            document
+              .getElementById("update-project-form")
+              .addEventListener("submit", handleUpdateProject);
+            document
+              .getElementById("delete-project-button-update")
+              .addEventListener("click", handleDeleteProject);
+          } else {
+            contentArea.innerHTML =
+              '<p class="text-center text-red-600 font-semibold">Cannot update. Please create a project first.</p>';
+          }
+        } else if (
+          actionId === "menu-review-projects" &&
+          authData.role === "SUPERVISOR"
+        ) {
+          // Supervisor Action
+          const pendingProjects = await fetchPendingProjects(authData.token);
+          contentArea.appendChild(createSupervisorReviewView(pendingProjects));
+
+          // Attach event listener for reviewing projects
+          contentArea.querySelectorAll(".review-button").forEach((button) => {
+            button.addEventListener("click", handleProjectReview);
+          });
+        }
+      };
+
+      /**
+       * Creates an input field HTML element.
+       */
+      const createInputField = (
+        id,
+        label,
+        type,
+        required = true,
+        pattern = null,
+        placeholder = "",
+        min = null,
+        max = null,
+        value = ""
+      ) => `
+            <div class="mb-4">
+                <label for="${id}" class="block text-sm font-medium text-gray-700 mb-1">${label}</label>
+                <input
+                    type="${type}"
+                    id="${id}"
+                    name="${id}"
+                    ${required ? "required" : ""}
+                    ${pattern ? `pattern="${pattern}"` : ""}
+                    ${placeholder ? `placeholder="${placeholder}"` : ""}
+                    ${min !== null ? `min="${min}"` : ""}
+                    ${max !== null ? `max="${max}"` : ""}
+                    value="${value}"
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"
+                >
+            </div>
+        `;
+
+      /**
+       * Creates the Login form component.
+       */
+      const createLoginForm = () => {
+        const div = document.createElement("div");
+        div.className =
+          "bg-card-bg p-8 md:p-10 rounded-xl shadow-2xl border border-gray-100";
+        div.innerHTML = `
+                <h1 class="text-3xl font-extrabold text-primary mb-2 text-center">Aleppo University</h1>
+                <h2 class="text-xl font-semibold text-gray-700 mb-8 text-center">Portal Login</h2>
+                <form id="login-form">
+                    ${createInputField(
+                      "email",
+                      "Email Address",
+                      "email",
+                      true,
+                      null,
+                      "e.g., student@example.com or supervisor@example.com"
+                    )}
+                    ${createInputField(
+                      "password",
+                      "Password",
+                      "password",
+                      true,
+                      null,
+                      "••••••••"
+                    )}
+                    <button type="submit" class="w-full bg-primary text-white py-3 rounded-lg font-bold hover:bg-opacity-90 transition duration-200 mt-4 shadow-md shadow-primary/30">
+                        Log In
+                    </button>
+                </form>
+                <div class="mt-6 text-center">
+                    <p class="text-sm text-gray-600">
+                        Don't have a student account?
+                        <button id="switch-to-signup" class="text-primary font-semibold hover:text-accent transition duration-150">
+                            Register Now (Students Only)
+                        </button>
+                    </p>
+                </div>
+            `;
+        return div;
+      };
+
+      /**
+       * Creates the Sign Up form component.
+       */
+      const createSignupForm = () => {
+        const div = document.createElement("div");
+        div.className =
+          "bg-card-bg p-8 md:p-10 rounded-xl shadow-2xl border border-gray-100";
+        div.innerHTML = `
+                <h1 class="text-3xl font-extrabold text-primary mb-2 text-center">Aleppo University</h1>
+                <h2 class="text-xl font-semibold text-gray-700 mb-8 text-center">Student Registration</h2>
+                <form id="signup-form">
+                    ${createInputField(
+                      "name",
+                      "Full Name",
+                      "text",
+                      true,
+                      null,
+                      "Your Full Name"
+                    )}
+                    ${createInputField(
+                      "cardNumber",
+                      "Card Number",
+                      "number",
+                      true,
+                      "^\\d+$",
+                      "7-digit Student ID (e.g., 1234567)"
+                    )}
+                    ${createInputField(
+                      "year",
+                      "Academic Year (1-5)",
+                      "number",
+                      true,
+                      null,
+                      "Choose a number between 1 and 5",
+                      1,
+                      5
+                    )}
+                    ${createInputField(
+                      "email",
+                      "Email Address",
+                      "email",
+                      true,
+                      null,
+                      "e.g., your.name@students.edu"
+                    )}
+                    ${createInputField(
+                      "password",
+                      "Password",
+                      "password",
+                      true,
+                      null,
+                      "Create a password"
+                    )}
+                    <button type="submit" class="w-full bg-accent text-primary py-3 rounded-lg font-bold hover:bg-opacity-90 transition duration-200 mt-4 shadow-md shadow-accent/30">
+                        Sign Up
+                    </button>
+                </form>
+                <div class="mt-6 text-center">
+                    <p class="text-sm text-gray-600">
+                        Already registered?
+                        <button id="switch-to-login" class="text-primary font-semibold hover:text-accent transition duration-150">
+                            Log In
+                        </button>
+                    </p>
+                </div>
+            `;
+        return div;
+      };
+
+      /**
+       * Creates the Project Status Badge.
+       */
+      const createStatusBadge = (status) => {
+        let color;
+        let text;
+        // Use uppercase strings to match the backend logic for display, 
+        // even though database stores them as lowercase.
+        const upperStatus = status.toUpperCase(); 
+
+        if (upperStatus === "PENDING") {
+          color = "bg-yellow-100 text-yellow-800";
+          text = "Pending Review";
+        } else if (upperStatus === "ACCEPTED") {
+          color = "bg-green-100 text-green-800";
+          text = "Accepted";
+        } else if (upperStatus === "REJECTED") { // Adjusted from DECLINED to REJECTED based on schema
+          color = "bg-red-100 text-red-800";
+          text = "Rejected";
+        } else {
+          color = "bg-gray-100 text-gray-800";
+          text = "Unknown";
+        }
+
+        return `<span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${color}">
+                        ${text}
+                    </span>`;
+      };
+
+      // Creates the Project Management Menu
+      const createProjectMenu = (projectExists, role) => {
+        let studentButtons = "";
+        if (role === "STUDENT") {
+          studentButtons = `
+                    <button id="menu-view-project" class="flex-1 min-w-[120px] py-2 px-3 rounded-lg font-semibold transition duration-150 text-white ${
+                      projectExists
+                        ? "bg-primary hover:bg-primary/90"
+                        : "bg-gray-400 cursor-not-allowed"
+                    }" ${projectExists ? "" : "disabled"}>
+                        ${projectExists ? "View Project" : "Project Not Found"}
+                    </button>
+                    <button id="menu-update-project" class="flex-1 min-w-[120px] py-2 px-3 rounded-lg font-semibold transition duration-150 text-primary ${
+                      projectExists
+                        ? "bg-accent hover:bg-accent/90"
+                        : "bg-gray-200 cursor-not-allowed"
+                    }" ${projectExists ? "" : "disabled"}>
+                        Update Project
+                    </button>
+                    <button id="menu-create-project" class="flex-1 min-w-[120px] py-2 px-3 rounded-lg font-semibold transition duration-150 ${
+                      projectExists
+                        ? "bg-gray-300 text-gray-700 cursor-not-allowed"
+                        : "bg-green-500 text-white hover:bg-green-600"
+                    }" ${projectExists ? "disabled" : ""}>
+                        Create Project
+                    </button>
+                `;
+        }
+
+        let supervisorButton = "";
+        if (role === "SUPERVISOR") {
+          supervisorButton = `
+                    <button id="menu-review-projects" class="flex-1 min-w-[200px] py-2 px-3 rounded-lg font-bold transition duration-150 bg-primary text-accent hover:bg-primary/90">
+                        Review Pending Projects 📚
+                    </button>
+                `;
+        }
+
+        return `
+                <div id="project-menu" class="flex flex-wrap justify-center gap-3 mt-6 mb-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    ${studentButtons}
+                    ${supervisorButton}
+                </div>
+                <div id="project-content-area" class="mt-4 pt-4 border-t border-gray-200">
+                    <p class="text-center text-gray-500">Select an option above to manage projects.</p>
+                </div>
+            `;
+      };
+
+      /**
+       * Creates the form for creating a new project. (UPDATED to include supervisor selection)
+       */
+      const createProjectCreateForm = (supervisors) => {
+        // Generate option tags for the dropdown
+        const supervisorOptions = supervisors
+          .map((s) => `<option value="${s.id}">${s.name} (${s.email})</option>`)
+          .join("");
+
+        const div = document.createElement("div");
+        div.className = "mt-4 pt-2";
+        div.innerHTML = `
+                <h3 class="text-xl font-bold text-primary mb-4">Register Your Project</h3>
+                <p class="text-gray-600 mb-4">Submit the title, description, and select a supervisor.</p>
+                <form id="create-project-form">
+                    ${createInputField(
+                      "project-title",
+                      "Project Title",
+                      "text",
+                      true,
+                      null,
+                      "e.g., Advanced AI for Data Analysis"
+                    )}
+                    
+                    <div class="mb-4">
+                        <label for="supervisor-select" class="block text-sm font-medium text-gray-700 mb-1">Select Supervisor</label>
+                        <select
+                            id="supervisor-select"
+                            name="supervisor-select"
+                            required
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"
+                        >
+                            <option value="" disabled selected>Choose a supervising professor...</option>
+                            ${supervisorOptions}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label for="project-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea
+                            id="project-description"
+                            name="project-description"
+                            required
+                            rows="4"
+                            placeholder="A brief summary of your project, goals, and methodology."
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"
+                        ></textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-primary text-white py-3 rounded-lg font-bold hover:bg-opacity-90 transition duration-200 mt-2">
+                        Create Project
+                    </button>
+                </form>
+            `;
+        return div;
+      };
+
+      /**
+       * Creates the update form for an existing project.
+       */
+      const createProjectUpdateForm = (project) => {
+        const div = document.createElement("div");
+        div.className = "mt-4 pt-2";
+        div.innerHTML = `
+                <h4 class="text-xl font-bold text-primary mb-4">Update Project Information</h4>
+                <p class="text-gray-600 mb-4">Only fill out fields you wish to change.</p>
+                <form id="update-project-form">
+                    ${createInputField(
+                      "update-title",
+                      "Project Title",
+                      "text",
+                      false,
+                      null,
+                      "Leave blank to keep current title",
+                      null,
+                      null,
+                      project.title
+                    )}
+                    <div class="mb-4">
+                        <label for="update-description" class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                        <textarea
+                            id="update-description"
+                            name="update-description"
+                            rows="4"
+                            placeholder="A brief summary of your project, goals, and methodology. Leave blank to keep current description."
+                            class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"
+                        >${project.description}</textarea>
+                    </div>
+                    <button type="submit" class="w-full bg-accent text-primary py-3 rounded-lg font-bold hover:bg-opacity-90 transition duration-200 mt-2">
+                        Submit Update
+                    </button>
+                </form>
+                <button id="delete-project-button-update" class="w-full bg-red-600 text-white py-3 rounded-lg font-bold hover:bg-red-700 transition duration-200 mt-4">
+                    Delete Project
+                </button>
+            `;
+        return div;
+      };
+
+      /**
+       * Creates the view for an existing project, including the delete button.
+       */
+const createProjectDetailsView = (project) => {
+    const div = document.createElement("div");
+    div.className = "mt-4 pt-2 animate-fadeIn";
+
+    const supervisorHtml = project.supervisor
+        ? `<p class="text-sm text-gray-700"><strong class="font-semibold text-primary">Supervisor:</strong> ${project.supervisor.name} (${project.supervisor.email})</p>`
+        : '<p class="text-sm text-gray-700"><strong class="font-semibold text-red-600">Supervisor:</strong> Not Yet Assigned</p>';
+
+    div.innerHTML = `
+        <div class="flex justify-between items-start gap-4 mb-4">
+            <h3 class="text-xl font-bold text-primary break-words flex-1 leading-tight">${project.title}</h3>
+            ${createStatusBadge(project.status)}
+        </div>
+
+        <div class="space-y-4 p-5 bg-white rounded-xl border border-gray-200 shadow-sm mb-6">
+            <div>
+                <strong class="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Project Description</strong>
+                <div class="text-gray-700 bg-bg-main p-3 rounded-lg border border-gray-100 whitespace-pre-wrap break-words leading-relaxed">${project.description ? project.description.trim() : "No description provided."}</div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-2 pt-2 border-t border-gray-50">
+                ${supervisorHtml}
+                <p class="text-sm text-gray-700">
+                    <strong class="font-semibold text-primary">Created On:</strong> 
+                    ${project.createAt ? new Date(project.createAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : 'Date Unknown'}
+                </p>
+            </div>
+        </div>
+        
+        <button id="delete-project-button-view" class="w-full bg-red-50 text-red-600 py-3 rounded-xl font-bold hover:bg-red-600 hover:text-white transition duration-200 border border-red-100">
+            Withdraw Submission
+        </button>
+    `;
+    return div;
+};
+
+      /**
+       * Creates the view for supervisors to review pending projects. (UPDATED to add comment box)
+       */
+      const createSupervisorReviewView = (projects) => {
+        const div = document.createElement("div");
+        div.className = "mt-4 pt-2";
+
+        let projectList = "";
+        if (projects.length === 0) {
+          projectList =
+            '<p class="text-center text-green-600 font-semibold mt-4">🎉 All caught up! No projects are currently pending review.</p>';
+        } else {
+          projectList = projects
+            .map(
+              (project) => `
+                    <div class="p-5 mb-4 bg-card-bg rounded-xl shadow border border-yellow-100" data-project-id="${
+                      project.id
+                    }">
+                        <div class="flex justify-between items-start">
+                            <h4 class="text-xl font-bold text-primary mb-1">${
+                              project.title
+                            }</h4>
+                            ${createStatusBadge(project.status)}
+                        </div>
+                        <p class="text-sm text-gray-500 mb-3">Submitted by: ${
+                          project.user.name
+                        } (${project.user.email}) - Year ${
+                project.user.year
+              }</p>
+                        
+                        <p class="text-sm text-gray-500 mb-3">Supervised by: ${
+                          project.supervisor ? project.supervisor.name : "N/A"
+                        }</p>
+                        
+                        <p class="text-sm text-gray-500 mb-3">Created On: ${new Date(
+                          project.createdAt
+                        ).toLocaleDateString()}</p>
+
+                        <details class="text-gray-700 my-3 p-2 bg-gray-50 rounded-lg border border-gray-200">
+                            <summary class="font-semibold text-primary cursor-pointer">View Description</summary>
+                            <p class="mt-2 text-sm">${project.description}</p>
+                        </details>
+                        
+                        <div class="mt-4">
+                            <label for="review-comment-${
+                              project.id
+                            }" class="block text-sm font-medium text-gray-700 mb-1">
+                                Reason/Comment (will be emailed to student)
+                            </label>
+                            <textarea
+                                id="review-comment-${project.id}"
+                                rows="2"
+                                placeholder="Enter a brief reason or comment for the student..."
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-primary focus:border-primary transition duration-150"
+                            ></textarea>
+                        </div>
+                        
+                        <div class="flex gap-3 justify-end mt-4">
+                            <button 
+                                class="review-button bg-green-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-green-600 transition duration-150"
+                                data-action="ACCEPT"
+                                data-id="${project.id}"
+                            >
+                                Accept
+                            </button>
+                            <button 
+                                class="review-button bg-red-500 text-white py-2 px-4 rounded-lg font-semibold hover:bg-red-600 transition duration-150"
+                                data-action="DECLINE"
+                                data-id="${project.id}"
+                            >
+                                Decline
+                            </button>
+                        </div>
+                    </div>
+                `
+            )
+            .join("");
+        }
+
+        div.innerHTML = `
+                <h3 class="text-2xl font-extrabold text-primary mb-6 text-center">Projects Awaiting Review (${projects.length})</h3>
+                <div id="pending-projects-list">
+                    ${projectList}
+                </div>
+            `;
+        return div;
+      };
+
+      /**
+       * Creates the Dashboard view component.
+       */
+      const createDashboardView = (userData) => {
+        const div = document.createElement("div");
+        div.className =
+          "bg-card-bg p-8 md:p-10 rounded-xl shadow-2xl border border-gray-100";
+
+        const roleText =
+          userData.role === "SUPERVISOR" ? "Supervisor" : "Student";
+
+        // User Info Section
+        let html = `
+                <div class="text-center">
+                    <div class="w-20 h-20 mx-auto bg-primary/10 text-primary rounded-full flex items-center justify-center text-4xl font-bold mb-4">
+                        ${userData.name ? userData.name[0] : "U"}
+                    </div>
+                    <h1 class="text-3xl font-extrabold text-primary mb-2">Welcome, ${
+                      userData.name
+                    }!</h1>
+                    <p class="text-lg text-gray-600 mb-6">${roleText} Portal</p>
+                </div>
+            `;
+
+        // Project Menu Section (Passed role)
+        html += createProjectMenu(!!userProject, userData.role);
+
+        // Sign Out Button
+        html += `
+                <button id="signout-button" class="w-full bg-gray-200 text-gray-700 py-3 rounded-lg font-bold hover:bg-gray-300 transition duration-200 mt-6">
+                    Sign Out
+                </button>
+            `;
+
+        div.innerHTML = html;
+        return div;
+      };
+
+      // --- Initialization ---
+
+      /**
+       * Checks local storage for an existing token and renders the appropriate view.
+       */
+      const checkAuthStatus = () => {
+        const authData = getAuthData();
+        if (authData.token) {
+          renderView("dashboard");
+        } else {
+          renderView("login");
+        }
+      };
+
+      // Run initialization when the page loads
+      document.addEventListener("DOMContentLoaded", checkAuthStatus);
+    </script>
+  </body>
+</html>

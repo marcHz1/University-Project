@@ -18,7 +18,7 @@ app.use('/project', projectRoutes);
 app.use('/supervisor', supervisorRoutes);
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, './uni-project/frontend-app/index.html'));
+    res.sendFile(path.join(__dirname, './frontend/index.html'));
 });
 
 app.use(errorHandling);
